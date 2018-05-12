@@ -30,6 +30,7 @@ const deployPuppeteerVersion = async (version) => {
   await logExec(`git checkout puppeteer-${version} --quiet`);
   await logExec(`git merge ${DEPLOY_BRANCH} --commit --quiet`);
   await logExec(`rm -rf node_modules package-lock.json`);
+  await logExec(`npm install --silent`);
   await logExec(`npm install --silent --save --save-exact puppeteer@${version}`);
   await getMeta();
 
@@ -44,7 +45,7 @@ const deployPuppeteerVersion = async (version) => {
     }
   }
 
-  await (`git push origin puppeteer-${version} --quiet`);
+  await logExec(`git push origin puppeteer-${version} --quiet`);
 }
 
 async function deploy () {
