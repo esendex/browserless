@@ -5,18 +5,23 @@ import * as httpProxy from 'http-proxy';
 import * as express from 'express';
 import * as multer from 'multer';
 import * as os from 'os';
-import { VM } from 'vm2';
+import { NodeVM } from 'vm2';
 import * as puppeteer from 'puppeteer';
 import { setInterval } from 'timers';
 import * as bodyParser from 'body-parser';
 
 const debug = require('debug')('browserless/chrome');
 const request = require('request');
-const requireFromString = require('require-from-string');
 const queue = require('queue');
+
 const version = require('../version.json');
 const protocol = require('../protocol.json');
 const hints = require('../hints.json');
+
+const thiryMinutes = 30 * 60 * 1000;
+const fiveMinute = 5 * 60 * 1000;
+const halfSecond = 500;
+const maxStats = 12 * 24 * 7; // 7 days @ 5-min intervals
 
 const chromeTarget = () => {
   var text = '';
@@ -34,15 +39,55 @@ const asyncMiddleware = (handler) => {
     Promise.resolve(handler(req, socket, head))
       .catch((error) => {
         debug(`ERROR: ${error}`);
-        socket.write('HTTP/1.1 429 Too Many Requests\r\n');
+        socket.write(`HTTP/1.1 500 ${error.message}\r\n`);
         socket.end();
       });
   }
 };
 
-const thiryMinutes = 30 * 60 * 1000;
-const fiveMinute = 5 * 60 * 1000;
-const maxStats = 12 * 24 * 7; // 7 days @ 5-min intervals
+const getCPUIdleAndTotal = ():ICPULoad => {
+  let totalIdle = 0;
+  let totalTick = 0;
+
+  const cpus = os.cpus();
+
+  for (var i = 0, len = cpus.length; i < len; i++) {
+    var cpu = cpus[i];
+
+    for (const type in cpu.times) {
+      totalTick += cpu.times[type];
+    }
+
+    //Total up the idle time of the core
+    totalIdle += cpu.times.idle;
+  }
+
+  //Return the average Idle and Tick times
+  return {
+    idle: totalIdle / cpus.length,
+    total: totalTick / cpus.length
+  };
+}
+
+const getMachineStats = (): Promise<IResourceLoad> => {
+  return new Promise((resolve) => {
+    const start = getCPUIdleAndTotal();
+
+    setTimeout(() => {
+      const end = getCPUIdleAndTotal();
+      const idleDifference = end.idle - start.idle;
+      const totalDifference = end.total - start.total;
+
+      const cpuUsage = 1 - (idleDifference / totalDifference);
+      const memoryUsage = 1 - (os.freemem() / os.totalmem());
+
+      return resolve({
+        cpuUsage,
+        memoryUsage,
+      });
+    }, 100);
+  });
+}
 
 export interface IOptions {
   connectionTimeout: number;
@@ -51,13 +96,25 @@ export interface IOptions {
   maxQueueLength: number;
   prebootChrome: boolean;
   demoMode: boolean;
-  singleUse: boolean;
   enableDebugger: boolean;
+  maxMemory: number;
+  maxCPU: number;
+  autoQueue: boolean;
   token: string | null;
   rejectAlertURL: string | null;
   queuedAlertURL: string | null;
   timeoutAlertURL: string | null;
   healthFailureURL: string | null;
+}
+
+interface ICPULoad {
+  idle: number;
+  total: number;
+}
+
+interface IResourceLoad {
+  cpuUsage: number;
+  memoryUsage: number;
 }
 
 interface IStats {
@@ -77,6 +134,9 @@ export class Chrome {
   public maxQueueLength: number;
   public connectionTimeout: number;
   public token: string | null;
+  public maxMemory: number;
+  public maxCPU: number;
+  public autoQueue: boolean;
 
   private proxy: any;
   private prebootChrome: boolean;
@@ -86,7 +146,6 @@ export class Chrome {
   private queue: any;
   private server: any;
   private debuggerScripts: any;
-  private singleUse: boolean;
 
   readonly rejectHook: Function;
   readonly queueHook: Function;
@@ -95,10 +154,10 @@ export class Chrome {
 
   private stats: IStats[];
   private currentStat: IStats;
+  private currentMachineStats: IResourceLoad;
 
   constructor(opts: IOptions) {
     this.port = opts.port;
-    this.singleUse = opts.singleUse;
     this.maxConcurrentSessions = opts.maxConcurrentSessions;
     this.maxQueueLength = opts.maxQueueLength + opts.maxConcurrentSessions;
     this.connectionTimeout = opts.connectionTimeout;
@@ -106,10 +165,17 @@ export class Chrome {
     this.demoMode = opts.demoMode;
     this.token = opts.token;
     this.enableDebugger = opts.enableDebugger;
+    this.maxCPU = opts.maxCPU;
+    this.maxMemory = opts.maxMemory;
+    this.autoQueue = opts.autoQueue;
 
     this.chromeSwarm = [];
-    this.stats = []
+    this.stats = [];
     this.debuggerScripts = new Map();
+    this.currentMachineStats = {
+      cpuUsage: 0,
+      memoryUsage: 0,
+    };
 
     this.proxy = new httpProxy.createProxyServer();
     this.proxy.on('error', function (err, _req, res) {
@@ -174,10 +240,11 @@ export class Chrome {
       queuedAlertURL: opts.queuedAlertURL,
       prebootChrome: this.prebootChrome,
       demoMode: this.demoMode,
-      singleUse: this.singleUse,
+      maxMemory: this.maxMemory,
+      maxCPU: this.maxCPU,
+      autoQueue: this.autoQueue,
+      enableDebugger: this.enableDebugger,
     }, `Final Options`);
-
-    setInterval(this.recordMetrics.bind(this), fiveMinute);
 
     if (this.prebootChrome) {
       for (let i = 0; i < this.maxConcurrentSessions; i++) {
@@ -186,6 +253,9 @@ export class Chrome {
     }
 
     this.resetCurrentStat();
+
+    setInterval(this.recordMachineStats.bind(this), halfSecond);
+    setInterval(this.recordMetrics.bind(this), fiveMinute);
   }
 
   private onTimedOut(next, job) {
@@ -223,11 +293,13 @@ export class Chrome {
     };
   }
 
-  private recordMetrics() {
-    const [,,fifteenMinuteAvg] = os.loadavg();
-    const cpuUsage = fifteenMinuteAvg / os.cpus().length;
-    const memoryUsage = 1 - (os.freemem() / os.totalmem());
+  private async recordMachineStats() {
+    this.currentMachineStats = await getMachineStats();
+  }
 
+  private async recordMetrics() {
+    const { cpuUsage, memoryUsage } = await getMachineStats();
+    debug(`Logging metrics for the current period: ${this.stats.length}`);
     this.stats.push(Object.assign({}, {
       ...this.currentStat,
       cpu: cpuUsage,
@@ -241,19 +313,14 @@ export class Chrome {
       this.stats.shift();
     }
 
-    const memorySample: IStats[] = _.takeRight(this.stats, 3);
-    const memoryAverage:number = _.reduce(memorySample, (accum: number, stat: IStats) => {
-      return accum + stat.memory;
-    }, 0) / memorySample.length;
-
-    if (cpuUsage > 0.99 || memoryAverage > 0.99) {
-      debug(`Health checks have failed, calling failure webhook: CPU: ${cpuUsage * 100}% Memory: ${memoryAverage * 100}%`);
+    if (cpuUsage >= this.maxCPU || memoryUsage >= this.maxMemory) {
+      debug(`Health checks have failed, calling failure webhook: CPU: ${cpuUsage}% Memory: ${memoryUsage}%`);
       this.healthFailureHook();
     }
   }
 
   private addToChromeSwarm() {
-    if (this.prebootChrome && (this.chromeSwarm.length < this.maxConcurrentSessions)) {
+    if (this.prebootChrome && (this.chromeSwarm.length < this.queue.concurrency)) {
       this.chromeSwarm.push(this.launchChrome());
       debug(`Added Chrome instance to swarm, ${this.chromeSwarm.length} online`);
     }
@@ -271,8 +338,20 @@ export class Chrome {
 
   private closeSocket(socket: any, message: string) {
     debug(`Closing socket.`);
-    socket.end(message);
-    socket.destroy();
+    if (socket.end) {
+      socket.end(message);
+    }
+
+    if (socket.destroy) {
+      socket.destroy();
+    }
+  }
+
+  private isMachineConstrained() {
+    return (
+      this.currentMachineStats.cpuUsage >= this.maxCPU ||
+      this.currentMachineStats.memoryUsage >= this.maxMemory
+    );
   }
 
   private async launchChrome(flags:string[] = [], retries:number = 1): Promise<puppeteer.Browser> {
@@ -305,20 +384,27 @@ export class Chrome {
 
     if (this.enableDebugger) {
       const upload = multer();
-      app.use('/', express.static('public'));
+
+      app.use('/', express.static('./debugger'));
       app.post('/execute', upload.single('file'), async (req, res) => {
         const targetId = chromeTarget();
-        const code = `
-        (async() => {
-          ${req.file.buffer.toString().replace('debugger', 'page.evaluate(() => { debugger; })')}
-        })().catch((error) => {
-          console.error('Puppeteer Runtime Error:', error.stack);
-        });`;
-  
+        const userScript = req.file.buffer.toString().replace('debugger', 'await page.evaluate(() => { debugger; })');
+
+        // Backwards compatability (remove after a few versions)
+        const code = userScript.includes('module.exports') ?
+          userScript :
+          `module.exports = async ({ page, context: {} }) => {
+            try {
+              ${userScript}
+            } catch (error) {
+              console.error('Unhandled Error:', error.message, error.stack);
+            }
+          }`;
+
         debug(`/execute: Script uploaded\n${code}`);
-  
+
         this.debuggerScripts.set(targetId, code);
-  
+
         res.json({
           targetId,
           debuggerVersion: version['Debugger-Version']
@@ -349,32 +435,80 @@ export class Chrome {
 
     app.get('/pressure', (_req, res) => {
       const queueLength = this.queue.length;
-      const concurrencyMet = queueLength >= this.maxConcurrentSessions;
+      const concurrencyMet = queueLength >= this.queue.concurrency;
 
       return res.json({
         pressure: {
           date: Date.now(),
-          running: concurrencyMet ? this.maxConcurrentSessions : queueLength,
-          queued: concurrencyMet ? queueLength - this.maxConcurrentSessions : 0,
+          running: concurrencyMet ? this.queue.concurrency : queueLength,
+          queued: concurrencyMet ? queueLength - this.queue.concurrency : 0,
           isAvailable: queueLength < this.maxQueueLength,
           recentlyRejected: this.currentStat.rejected,
         }
       });
     });
 
-    app.post('/function', async (req, res) => {
-      const { code: handlerFn, context: stringifiedContext } = req.body;
+    app.post('/function', asyncMiddleware(async (req, res) => {
+      const queueLength = this.queue.length;
+      const isMachineStrained = this.isMachineConstrained();
 
-      const code = requireFromString(handlerFn);
-      const context = JSON.parse(stringifiedContext);
+      if (queueLength >= this.maxQueueLength) {
+        return this.onRejected(req, res, `HTTP/1.1 429 Too Many Requests`);
+      }
 
-      return code({
-        puppeteer,
-        context,
-      })
-      .then((result) => res.json(result))
-      .catch((error) => res.status(500).send(error.message));
-    })
+      if (this.autoQueue && (this.queue.length < this.queue.concurrency)) {
+        this.queue.concurrency = isMachineStrained ? this.queue.length : this.maxConcurrentSessions;
+      }
+
+      if (queueLength >= this.queue.concurrency) {
+        this.onQueued(req);
+      }
+
+      const { code, context } = req.body;
+      const vm = new NodeVM();
+      const handler: (any) => Promise<any> = vm.run(code);
+
+      debug(`${req.url}: Inbound function execution: ${JSON.stringify({ code, context })}`);
+
+      const job:any = async () => {
+        const browser = await this.launchChrome();
+        const page = await browser.newPage();
+
+        job.browser = browser;
+
+        return handler({ page, context })
+          .then((result) => {
+            res.json(result);
+            debug(`${req.url}: Function complete, stopping Chrome`);
+            _.attempt(() => browser.close());
+          })
+          .catch((error) => {
+            console.log()
+            res.status(500).send(error.message);
+            debug(`${req.url}: Function errored, stopping Chrome`);
+            _.attempt(() => browser.close());
+          });
+      };
+
+      job.close = () => {
+        if (job.browser) {
+          job.browser.close();
+        }
+
+        if (!res.headersSent) {
+          res.status(408).send('browserless function has timed-out');
+        }
+      };
+
+      req.on('close', () => {
+        if (job.browser) {
+          debug(`${req.url}: Request has terminated, stopping Chrome.`);
+          job.browser.close();
+        }
+      });
+
+      this.queue.push(job);
+    }));
 
     app.get('/json*', asyncMiddleware(async (req, res) => {
       const targetId = chromeTarget();
@@ -391,7 +525,7 @@ export class Chrome {
         type: 'page',
         url: 'about:blank',
         webSocketDebuggerUrl: `${protocol}://${baseUrl}${targetId}`
-     }]);
+      }]);
     }));
 
     return this.server = http
@@ -400,6 +534,7 @@ export class Chrome {
         const parsedUrl = url.parse(req.url, true);
         const route = parsedUrl.pathname || '/';
         const queueLength = this.queue.length;
+        const isMachineStrained = this.isMachineConstrained();
 
         debug(`${req.url}: Inbound WebSocket request. ${this.queue.length} in queue.`);
 
@@ -415,7 +550,11 @@ export class Chrome {
           return this.onRejected(req, socket, `HTTP/1.1 429 Too Many Requests`);
         }
 
-        if (queueLength >= this.maxConcurrentSessions) {
+        if (this.autoQueue && (this.queue.length < this.queue.concurrency)) {
+          this.queue.concurrency = isMachineStrained ? this.queue.length : this.maxConcurrentSessions;
+        }
+
+        if (queueLength >= this.queue.concurrency) {
           this.onQueued(req);
         }
 
@@ -449,41 +588,38 @@ export class Chrome {
                 return browserWsEndpoint;
               }
 
-              if (this.singleUse) {
-                browser.on('disconnected', () => process.exit(0));
-              }
-
-              const page:any = await browser.newPage();
-              const port = url.parse(browserWsEndpoint).port;
-              const pageLocation = `/devtools/page/${page._target._targetId}`;
-
-              debug(`${req.url}: Proxying request to /devtools/page route: ${pageLocation}.`);
-
               if (this.debuggerScripts.has(route)) {
+                debug(`${req.url}: Executing prior-uploaded script.`);
+
+                const page:any = await browser.newPage();
+                const port = url.parse(browserWsEndpoint).port;
+                const pageLocation = `/devtools/page/${page._target._targetId}`;
                 const code = this.debuggerScripts.get(route);
-                debug(`${req.url}: Loading prior-uploaded script to execute for route.`);
+                this.debuggerScripts.delete(route);
 
                 const sandbox = {
-                  page,
-                  console: {
-                    log: (...args) => page.evaluate((...args) => console.log(...args), ...args),
-                    error: (...args) => page.evaluate((...args) => console.error(...args), ...args),
-                    debug: (...args) => page.evaluate((...args) => console.debug(...args), ...args),
-                  },
+                  console: _.reduce(_.keys(console), (browserConsole, consoleMethod) => {
+                    browserConsole[consoleMethod] = (...args) => {
+                      args.unshift(consoleMethod);
+                      return page.evaluate((...args) => {
+                        const [consoleMethod, ...consoleArgs] = args;
+                        return console[consoleMethod](...consoleArgs);
+                      }, ...args);
+                    };
+
+                    return browserConsole;
+                  }, {}),
                 };
 
-                const vm = new VM({
-                  sandbox,
-                  timeout: this.connectionTimeout
-                });
+                const vm = new NodeVM({ sandbox });
+                const handler = vm.run(code);
 
-                this.debuggerScripts.delete(route);
-                vm.run(code);
+                handler({ page, context: {} });
+                req.url = pageLocation;
+                return `ws://127.0.0.1:${port}`;
               }
 
-              req.url = pageLocation;
-
-              return `ws://127.0.0.1:${port}`;
+              throw new Error(`Unknown action: ${req.url}`);
             })
             .then((target) => this.proxy.ws(req, socket, head, { target }))
             .catch((error) => {

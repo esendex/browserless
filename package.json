@@ -1,13 +1,17 @@
 {
   "name": "browserless-chrome",
-  "version": "1.0.0",
+  "version": "1.0.0-alpha",
   "description": "Chrome-as-a-service on your own hardware or in the cloud.",
   "main": "build/index.js",
+  "files": [
+    "build/main.css",
+    "build/main.js"
+  ],
   "scripts": {
     "build": "npm run clean && tsc",
     "clean": "rimraf build",
     "deploy": "./scripts/deploy.js",
-    "dev": "npm run build && DEBUG=browserless/chrome node build/index.js",
+    "dev": "npm run build && MAX_CONCURRENT_SESSIONS=1 DEBUG=browserless/chrome node build/index.js",
     "meta": "./scripts/get-meta.js",
     "start": "node ./build",
     "test": "jest"
@@ -35,13 +39,14 @@
     "request": "^2.83.0",
     "require-from-string": "^2.0.2",
     "rimraf": "^2.6.1",
-    "typescript": "^2.4.2",
+    "typescript": "^2.8.3",
     "vm2": "^3.5.2"
   },
   "devDependencies": {
     "@types/jest": "^22.1.0",
     "jest": "^22.1.4",
     "node-fetch": "^1.7.3",
+    "nodemon": "^1.17.3",
     "showdown": "^1.8.6",
     "ts-jest": "^22.0.1",
     "ts-node": "^4.1.0"
