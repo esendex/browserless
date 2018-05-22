@@ -1,4 +1,4 @@
-![browserless splash logo](assets/splash.png)
+![browserless splash logo](https://raw.githubusercontent.com/joelgriffith/browserless/master/assets/splash.png)
 
 
 [Visit a live demo in Chrome here](https://chrome.browserless.io/).
@@ -52,7 +52,7 @@ In order to run Browserless, you'll need:
 
 ## 🐛 Debugger
 
-![Browserless Debugger](./assets/demo.gif)
+![Browserless Debugger](https://raw.githubusercontent.com/joelgriffith/browserless/master/assets/demo.gif)
 
 ⚠️ **HOSTING**: In order for the debugger to work properly in hosted environments (AWS, Heroku, and others) your site _needs_ to be deployed under HTTPS. This is due to devtools scripts being loaded from an http-based domain. For further help/information look at some projects like [localtunnel](https://github.com/localtunnel/localtunnel), [certbot](https://certbot.eff.org/), or even netlify to achieve these efforts.
 
