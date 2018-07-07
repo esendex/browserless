@@ -23,7 +23,7 @@ module.exports = async function pdf({ page, context }) {
   const { url, html, options } = context;
 
   if (url != null) {
-    await page.goto(url);
+    await page.goto(url, { waitUntil: 'networkidle0' });
   } else {
     // Whilst there is no way of waiting for all requests to finish with setContent,
     // you can simulate a webrequest this way
@@ -35,13 +35,7 @@ module.exports = async function pdf({ page, context }) {
       page.on('request', request => request.continue());
     });
 
-    page.goto('http://localhost');
-
-    await Promise.race([
-      page.waitForNavigation({waitUntil: 'load'}),
-      page.waitForNavigation({waitUntil: 'networkidle0'})
-    ]);
-
+    page.goto('http://localhost', { waitUntil: 'networkidle0' });
   }
 
   const data = await page.pdf(options);
