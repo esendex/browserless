@@ -237,7 +237,7 @@ export class BrowserlessServer {
       return this.server = http
         .createServer(app)
         .on('upgrade', asyncMiddleware(this.chromeService.runWebSocket.bind(this.chromeService)))
-        .listen(this.config.port, resolve);
+        .listen(this.config.port, this.config.host, resolve);
     });
   }
 
@@ -285,7 +285,7 @@ export class BrowserlessServer {
 
   private async recordMetrics() {
     const { cpuUsage, memoryUsage } = await this.resourceMonitor.getMachineStats();
-    debug(`Logging metrics for the current period: ${this.stats.length}`);
+
     this.stats.push(Object.assign({}, {
       ...this.currentStat,
       cpu: cpuUsage,

@@ -26,11 +26,19 @@ export class ChromeService {
   constructor(config: IChromeServiceConfiguration, server: BrowserlessServer) {
     this.config = config;
     this.server = server;
-    this.queue = queue({
+
+    const queueParams: any = {
       autostart: true,
       concurrency: this.config.maxConcurrentSessions,
-      timeout: this.config.connectionTimeout,
-    });
+    };
+
+    if (this.config.connectionTimeout !== -1) {
+      queueParams.timeout = this.config.connectionTimeout;
+    }
+
+    sysdebug(`Queue started with params ${JSON.stringify(queueParams)}`);
+
+    this.queue = queue(queueParams);
 
     this.queue.on('success', this.onSessionSuccess.bind(this));
     this.queue.on('error', this.onSessionFail.bind(this));
@@ -142,53 +150,61 @@ export class ChromeService {
           .map((value, key) => `${key}${value ? `=${value}` : ''}`)
           .value();
 
-        this.getChrome(flags).then(async (browser) => {
-          const page = await browser.newPage();
+        this.getChrome(flags)
+          .then(async (browser) => {
+            const page = await browser.newPage();
 
-          jobdetaildebug(`${job.id}: Executing function: ${JSON.stringify({ code, context })}`);
-          job.browser = browser;
+            jobdetaildebug(`${job.id}: Executing function.`);
+            job.browser = browser;
 
-          req.removeListener('close', earlyClose);
-          req.once('close', () => {
-            jobdebug(`${job.id}: Request terminated during execution, closing`);
-            done();
-          });
-
-          Promise.resolve(handler({ page, context }))
-            .then(({ data, type = 'text/plain' } = {}) => {
-              jobdebug(`${job.id}: Function complete, cleaning up.`);
-
-              // If we've already responded (detached)
-              // Then call done and return
-              if (res.headersSent) {
-                return done();
-              }
-
-              res.type(type);
-
-              if (Buffer.isBuffer(data)) {
-                res.end(data, 'binary');
-              } else if (type.includes('json')) {
-                res.json(data);
-              } else {
-                res.send(data);
-              }
-
-              return done();
-            })
-            .catch((error) => {
-              if (!res.headersSent) {
-                res.status(500).send(error.message);
-              }
-              jobdebug(`${job.id}: Function errored, stopping Chrome`);
+            req.removeListener('close', earlyClose);
+            req.once('close', () => {
+              jobdebug(`${job.id}: Request terminated during execution, closing`);
               done();
             });
-        });
+
+            return Promise.resolve(handler({ page, context }))
+              .then(({ data, type = 'text/plain' } = {}) => {
+                jobdebug(`${job.id}: Function complete, cleaning up.`);
+
+                // If we've already responded (detached)
+                // Then call done and return
+                if (res.headersSent) {
+                  return done();
+                }
+
+                res.type(type);
+
+                if (Buffer.isBuffer(data)) {
+                  res.end(data, 'binary');
+                } else if (type.includes('json')) {
+                  res.json(data);
+                } else {
+                  res.send(data);
+                }
+
+                return done();
+              });
+          })
+          .catch((error) => {
+            if (!res.headersSent) {
+              res.status(500).send(error.message);
+            }
+            jobdebug(`${job.id}: Function errored, stopping Chrome`);
+            done();
+          });
       },
       {
         browser: null,
         close: () => this.cleanUpJob(job),
         id: jobId,
+        timeout: () => {
+          if (!res.headersSent) {
+            jobdebug(`${job.id}: Function has timed-out, sending 408.`);
+            res.status(408).send('browserless function has timed-out');
+          }
+          jobdebug(`${job.id}: Function has timed-out but headers already sent...`);
+        },
       },
     );
 
@@ -296,6 +312,10 @@ export class ChromeService {
       browser: null,
       close: () => this.cleanUpJob(job),
       id: jobId,
+      timeout: () => {
+        jobdebug(`${job.id}: Job has timed-out, closing the WebSocket.`);
+        socket.end();
+      },
     };
 
     const job: IJob = Object.assign(handler, jobProps);
@@ -343,6 +363,7 @@ export class ChromeService {
     jobdebug(`${job.id}: Recording timedout stat.`);
     this.server.currentStat.timedout++;
     this.server.timeoutHook();
+    job.timeout();
     job.close();
     next();
   }
