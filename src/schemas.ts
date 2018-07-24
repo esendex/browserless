@@ -24,10 +24,10 @@ export const pdf = Joi.object().keys({
   html: Joi.string(),
   options: Joi.object().keys({
     displayHeaderFooter: Joi.boolean(),
-    footerTemplate: Joi.string(),
+    footerTemplate: Joi.string().allow(null),
     format: Joi.string()
       .valid('Letter', 'Legal', 'Tabloid', 'Ledger', 'A0', 'A1', 'A2', 'A3', 'A4', 'A5', 'A6'),
-    headerTemplate: Joi.string(),
+    headerTemplate: Joi.string().allow(null),
     height: Joi.any().optional(),
     landscape: Joi.boolean(),
     margin: Joi.object().keys({
