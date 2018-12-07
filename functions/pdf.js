@@ -93,13 +93,12 @@ module.exports = async function pdf({ page, context }) {
 
     await page.setRequestInterception(true);
     page.once('request', request => {
-      request.respond({ body: html });
+      request.respond({body: html});
       page.on('request', request => request.continue());
     });
 
-    await page.goto('http://localhost', gotoOptions);
+    page.goto('http://localhost');
 
-    // Temporary fix for fonts until 1.11.0 Puppeteer
     await Promise.all([
       page.waitForNavigation({waitUntil: 'load'}),
       page.waitForNavigation({waitUntil: 'networkidle0'})
