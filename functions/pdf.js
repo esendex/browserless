@@ -96,8 +96,14 @@ module.exports = async function pdf({ page, context }) {
       request.respond({ body: html });
       page.on('request', request => request.continue());
     });
-    
+
     await page.goto('http://localhost', gotoOptions);
+
+    // Temporary fix for fonts until 1.11.0 Puppeteer
+    await Promise.all([
+      page.waitForNavigation({waitUntil: 'load'}),
+      page.waitForNavigation({waitUntil: 'networkidle0'})
+    ]);
   }
 
   const data = safeMode ?
