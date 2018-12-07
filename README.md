@@ -1,5 +1,8 @@
 ![browserless splash logo](https://raw.githubusercontent.com/joelgriffith/browserless/master/assets/splash.png)
 
+[![Build Status](https://travis-ci.org/joelgriffith/browserless.svg?branch=master)](https://travis-ci.org/joelgriffith/browserless) [![Greenkeeper badge](https://badges.greenkeeper.io/joelgriffith/browserless.svg)](https://greenkeeper.io/)
+
+[Full documentation here](https://docs.browserless.io/).
 
 [Visit a live demo in Chrome here](https://chrome.browserless.io/).
 
@@ -29,6 +32,8 @@ Your application still runs the script itself (much like a database interaction)
 
 ## 🐳 Docker Quickstart
 
+> See more options on our [full documentation site](https://docs.browserless.io/docs/docker.html).
+
 ⚠️ HOSTING: In order for the debugger to work properly in hosted environments (AWS, Heroku, and others) your site needs to be deployed under HTTPS. This is due to devtools scripts being loaded from a secure domain. For further help/information look at some projects like localtunnel, certbot, or even netlify to achieve these efforts.
 
 1. `docker pull browserless/chrome`
@@ -40,7 +45,7 @@ Your application still runs the script itself (much like a database interaction)
 In order to run Browserless, you'll need:
 * Node version 8+
 * Chrome Dependencies: 
-  * `Sudo apt-get install -y  wget  unzip   fontconfig   locales  gconf-service   libasound2 libatk1.0-0   libc6   libcairo2   libcups2   libdbus-1-3   libexpat1   libfontconfig1   libgcc1   libgconf-2-4   libgdk-pixbuf2.0-0 libglib2.0-0   libgtk-3-0   libnspr4   libpango-1.0-0   libpangocairo-1.0-0   libstdc++6   libx11-6   libx11-xcb1   libxcb1 libxcomposite1   libxcursor1   libxdamage1   libxext6  libxfixes3   libxi6   libxrandr2   libxrender1   libxss1 libxtst6   ca-certificates   fonts-liberation   libappindicator1   libnss3   lsb-release   xdg-utils   wget`
+  * `sudo apt-get install -y  wget  unzip   fontconfig   locales  gconf-service   libasound2 libatk1.0-0   libc6   libcairo2   libcups2   libdbus-1-3   libexpat1   libfontconfig1   libgcc1   libgconf-2-4   libgdk-pixbuf2.0-0 libglib2.0-0   libgtk-3-0   libnspr4   libpango-1.0-0   libpangocairo-1.0-0   libstdc++6   libx11-6   libx11-xcb1   libxcb1 libxcomposite1   libxcursor1   libxdamage1   libxext6  libxfixes3   libxi6   libxrandr2   libxrender1   libxss1 libxtst6   ca-certificates   fonts-liberation   libappindicator1   libnss3   lsb-release   xdg-utils   wget`
 
 **Browserless Install**
 
@@ -130,12 +135,13 @@ Getting Chrome running well in docker is also a challenge as there's quiet a few
 
 All of these issues prompted me to build a first-class image and workflow for interacting with Chrome in a more streamlined way. With browserless you never have to worry about fonts, extra packages, library support, or anything else. It should just work. On top of that it comes with a prescribed approach on how you interact with Chrome, which is through socket connections (similar to a database or any other external appliance). What this means it that you get the ability to drive Chrome remotely without having to do updates/releases to the thing that runs Chrome since it's divorced from your application.
 
-# License
+# Licensing
 
-## Corporate license
+If you want to use browserless to build commercial sites, applications, or in a CI system that's closed-source then you'll need to purchase a commercial license. This allows you to keep your software proprietary whilst still using browserless. [You can purchase a commercial license here](https://www.browserless.io/commercial-license). A commercial license grants you:
 
-If you want to use browserless to build commercial sites and applications then the corporate license is what you're after. This allows you to keep your software proprietary whilst still using browserless. [Contact us for more details](mailto:license@browserless.io)
-
-## Open source license
+- Priority support on issues and features.
+- Re-packaging and on-premise installations.
+- No limits on concurrency or instances running.
+- Ability to modify the source (forking) for your own purposes.
 
 If you are creating an open source application under a license compatible with the GNU GPL license v3, you may use browserless under the terms of the GPLv3. You can read more about this license [here](https://www.gnu.org/licenses/quick-guide-gplv3.en.html).

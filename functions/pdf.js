@@ -19,11 +19,73 @@
  * @param args.page - object - Puppeteer's page object (from await browser.newPage)
  * @param args.context - object - An object of parameters that the function is called with. See src/schemas.ts
  */
-module.exports = async function pdf({ page, context }) {
-  const { url, html, options } = context;
+const buildPages = async (page, opts = {}) => {
+  const pdftk = require('node-pdftk');
+  const pageBuffers = [];
+  let complete = false;
+  let pageCount = 1;
 
-  if (url != null) {
-    await page.goto(url);
+  // If ranges are specified, don't render them all
+  if (opts.pageRanges) {
+    return page.pdf(opts);
+  }
+
+  while (!complete) {
+    try {
+      const buffer = await page.pdf({
+        ...opts,
+        pageRanges: pageCount.toString(),
+      });
+      pageBuffers.push(buffer);
+      pageCount = pageCount + 1;
+    } catch(error) {
+      if (error.message && error.message.includes('Page range exceeds page count')) {
+        complete = true;
+      } else {
+        throw error;
+      }
+    }
+  }
+
+  return pdftk
+    .input(pageBuffers)
+    .cat()
+    .compress()
+    .output();
+};
+
+module.exports = async function pdf({ page, context }) {
+  const {
+    cookies,
+    emulateMedia,
+    html,
+    options,
+    url = null,
+    safeMode,
+    gotoOptions,
+    rejectRequestPattern,
+  } = context;
+
+  if (rejectRequestPattern.length) {
+    await page.setRequestInterception(true);
+    page.on('request', (req) => {
+      if (rejectRequestPattern.find((pattern) => req.url().match(pattern))) {
+        return req.abort();
+      }
+      return req.continue();
+    });
+  }
+
+  if (emulateMedia) {
+    await page.emulateMedia(emulateMedia);
+  }
+
+  if (cookies.length) {
+    await page.setCookie(...cookies);
+  }
+
+  if (url !== null) {
+    await page.goto(url, gotoOptions);
   } else {
     // Whilst there is no way of waiting for all requests to finish with setContent,
     // you can simulate a webrequest this way
@@ -31,20 +93,16 @@ module.exports = async function pdf({ page, context }) {
 
     await page.setRequestInterception(true);
     page.once('request', request => {
-      request.respond({body: html});
+      request.respond({ body: html });
       page.on('request', request => request.continue());
     });
-
-    page.goto('http://localhost');
-
-    await Promise.all([
-      page.waitForNavigation({waitUntil: 'load'}),
-      page.waitForNavigation({waitUntil: 'networkidle0'})
-    ]);
-
+    
+    await page.goto('http://localhost', gotoOptions);
   }
 
-  const data = await page.pdf(options);
+  const data = safeMode ?
+    await buildPages(page, options) :
+    await page.pdf(options);
 
   return {
     data,

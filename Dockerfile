@@ -1,11 +1,11 @@
-FROM ubuntu:16.04
+FROM ubuntu:18.04
 
 # Application parameters and variables
 ENV NODE_ENV=production
 ENV HOST=0.0.0.0
 ENV PORT=3000
 ENV application_directory=/usr/src/app
-ENV font_directory=/usr/share/fonts/noto
+ENV ENABLE_XVBF=true
 
 # Build Args
 ARG USE_CHROME_STABLE
@@ -16,7 +16,6 @@ ENV CHROME_PATH=/usr/bin/google-chrome
 ENV USE_CHROME_STABLE=${USE_CHROME_STABLE}
 
 RUN mkdir -p $application_directory
-RUN mkdir -p $font_directory
 
 WORKDIR $application_directory
 
@@ -27,11 +26,20 @@ COPY tsconfig.json .
 # Bundle app source
 COPY . .
 
-# Dependencies needed for packages downstream
-RUN apt-get update && apt-get install -y \
-  chromium-codecs-ffmpeg \
-  unzip \
+# Dependencies + NodeJS
+RUN apt-get update && \
+  echo "ttf-mscorefonts-installer msttcorefonts/accepted-mscorefonts-eula select true" | debconf-set-selections && \
+  apt-get install -y software-properties-common &&\
+  apt-add-repository ppa:malteworld/ppa && apt-get update && apt-get install -y \
+  msttcorefonts \
+  fonts-noto-color-emoji \
+  fonts-noto-cjk \
+  fonts-liberation \
+  fonts-thai-tlwg \
   fontconfig \
+  libappindicator3-1 \
+  pdftk \
+  unzip \
   locales \
   gconf-service \
   libasound2 \
@@ -65,29 +73,23 @@ RUN apt-get update && apt-get install -y \
   libxss1 \
   libxtst6 \
   ca-certificates \
-  fonts-liberation \
-  fonts-thai-tlwg \
   libappindicator1 \
   libnss3 \
   lsb-release \
   xdg-utils \
-  wget
+  wget \
+  xvfb \
+  curl &&\
+  # Install Node
+  curl --silent --location https://deb.nodesource.com/setup_8.x | bash - &&\
+  apt-get install --yes nodejs &&\
+  apt-get install --yes build-essential &&\
+  # Fonts
+  fc-cache -f -v
 
 # It's a good idea to use dumb-init to help prevent zombie chrome processes.
 ADD https://github.com/Yelp/dumb-init/releases/download/v1.2.0/dumb-init_1.2.0_amd64 /usr/local/bin/dumb-init
 RUN chmod +x /usr/local/bin/dumb-init
-
-# Install Node.js
-RUN apt-get install --yes curl &&\
-  curl --silent --location https://deb.nodesource.com/setup_8.x | bash - &&\
-  apt-get install --yes nodejs &&\
-  apt-get install --yes build-essential
-
-# Install emoji's
-RUN cd $font_directory &&\
-  wget https://github.com/emojione/emojione-assets/releases/download/3.1.2/emojione-android.ttf &&\
-  wget https://github.com/googlei18n/noto-cjk/blob/master/NotoSansCJKsc-Medium.otf?raw=true && \
-  fc-cache -f -v
 
 # Install Chrome Stable when specified
 RUN if [ "$USE_CHROME_STABLE" = "true" ]; then \
@@ -102,10 +104,20 @@ RUN if [ "$USE_CHROME_STABLE" = "true" ]; then \
   fi &&\
   npm install -g typescript @types/node &&\
   npm install &&\
-  npm run build
+  npm run build &&\
+  npm run symlink-chrome
 
 # Cleanup
 RUN apt-get clean && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
+
+# Add user
+RUN groupadd -r blessuser && useradd -r -g blessuser -G audio,video blessuser \
+  && mkdir -p /home/blessuser/Downloads \
+  && chown -R blessuser:blessuser /home/blessuser \
+  && chown -R blessuser:blessuser $application_directory
+
+# Run everything after as non-privileged user.
+USER blessuser
 
 # Expose the web-socket and HTTP ports
 EXPOSE 3000

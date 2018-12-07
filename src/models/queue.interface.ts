@@ -4,10 +4,10 @@ import { BrowserlessSandbox } from '../Sandbox';
 
 export interface IJob {
   (done?: () => {}): any | Promise<any>;
-  id: string;
-  browser: Browser | BrowserlessSandbox | null;
-  close: () => any;
-  timeout: () => any;
+  id?: string;
+  browser?: Browser | BrowserlessSandbox | null;
+  close?: () => any;
+  timeout?: () => any;
 }
 
 export interface IQueue<IJob> extends EventEmitter, Array<IJob> {
@@ -15,3 +15,5 @@ export interface IQueue<IJob> extends EventEmitter, Array<IJob> {
   remove: (job: IJob) => any;
   add: (job: IJob) => any;
 }
+
+export type IDone = (error?: Error) => any;

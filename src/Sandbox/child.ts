@@ -3,6 +3,7 @@ import * as puppeteer from 'puppeteer';
 import * as url from 'url';
 import { NodeVM } from 'vm2';
 
+import { launchChrome } from '../chrome-helper';
 import { IMessage } from '../models/sandbox.interface';
 import { getDebug } from '../utils';
 
@@ -37,23 +38,21 @@ const buildBrowserSandbox = (page: puppeteer.Page): { console: any } => {
 };
 
 const start = async (
-  { code, flags = [], useChromeStable }:
-  { code: string; flags: string[], useChromeStable: boolean },
+  { code, opts }:
+  { code: string; opts: puppeteer.LaunchOptions },
 ) => {
   debug(`Starting sandbox running code "${code}"`);
-  const launchArgs: puppeteer.LaunchOptions = {
-    args: flags.concat(['--no-sandbox', '--disable-dev-shm-usage']),
-  };
 
-  if (useChromeStable) {
-    launchArgs.executablePath = '/usr/bin/google-chrome';
-  }
-
-  debug(`Starting Chrome with args: ${JSON.stringify(launchArgs)}`);
-
-  const browser = await puppeteer.launch(launchArgs);
+  const browser = await launchChrome(opts);
   const browserWsEndpoint = browser.wsEndpoint();
   const page: any = await browser.newPage();
+  page.on('error', (error) => {
+    debug(`Page error: ${error.message}`);
+    send({
+      error,
+      event: 'error',
+    });
+  });
   const pageLocation = `/devtools/page/${page._target._targetId}`;
   const port = url.parse(browserWsEndpoint).port;
   const data = {

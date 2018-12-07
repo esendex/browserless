@@ -15,9 +15,28 @@
  * @param args.context - object - An object of parameters that the function is called with. See src/schemas.ts
  */
 module.exports = async function content ({ page, context }) {
-  const { url } = context;
+  const {
+    url,
+    gotoOptions,
+    rejectRequestPattern,
+    cookies,
+  } = context;
 
-  await page.goto(url);
+  if (rejectRequestPattern.length) {
+    await page.setRequestInterception(true);
+    page.on('request', (req) => {
+      if (rejectRequestPattern.find((pattern) => req.url().match(pattern))) {
+        return req.abort();
+      }
+      return req.continue();
+    });
+  }
+
+  if (cookies.length) {
+    await page.setCookie(...cookies);
+  }
+
+  await page.goto(url, gotoOptions);
 
   const data = await page.content();
 

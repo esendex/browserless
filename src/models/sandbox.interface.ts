@@ -1,11 +1,13 @@
+import { LaunchOptions } from 'puppeteer';
+
 export interface IConfig {
   code: string;
   timeout: number;
-  useChromeStable: boolean;
-  flags?: string[];
+  opts?: LaunchOptions;
 }
 
 export interface IMessage {
   event: string;
-  context: any;
+  context?: any;
+  error?: string;
 }

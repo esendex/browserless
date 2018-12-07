@@ -12,7 +12,7 @@ export class BrowserlessSandbox extends EventEmitter {
   private child: ChildProcess;
   private timer: NodeJS.Timer;
 
-  constructor({ code, timeout, flags, useChromeStable }: IConfig) {
+  constructor({ code, timeout, opts }: IConfig) {
     super();
 
     this.child = fork(path.join(__dirname, 'child'));
@@ -26,13 +26,18 @@ export class BrowserlessSandbox extends EventEmitter {
         debug(`Sandbox ready, forwarding location`);
         this.emit('launched', message.context);
       }
+
+      if (message.event === 'error') {
+        debug(`Sandbox crashed, closing`);
+        this.emit('error', message.context);
+        this.close();
+      }
     });
 
     this.child.send({
       context: {
         code,
-        flags,
-        useChromeStable,
+        opts,
       },
       event: 'start',
     });

@@ -1,6 +1,29 @@
 import * as Joi from 'joi';
 
+const gotoOptions = Joi.object().keys({
+  timeout: Joi.number(),
+  waitUntil: Joi.string()
+    .valid('load', 'domcontentloaded', 'networkidle0', 'networkidle2'),
+});
+
+const rejectRequestPattern = Joi.array().items(Joi.string()).default([]);
+
+const cookies = Joi.array().items(Joi.object({
+  domain: Joi.string(),
+  expires: Joi.number().min(0),
+  httpOnly: Joi.boolean(),
+  name: Joi.string().required(),
+  path: Joi.string(),
+  sameSite: Joi.string().valid('Strict', 'Lax'),
+  secure: Joi.boolean(),
+  url: Joi.string(),
+  value: Joi.string().required(),
+})).default([]);
+
 export const screenshot = Joi.object().keys({
+  cookies,
+  gotoOptions,
+  html: Joi.string(),
   options: Joi.object().keys({
     clip: Joi.object().keys({
       height: Joi.number().min(0),
@@ -13,14 +36,21 @@ export const screenshot = Joi.object().keys({
     quality: Joi.number().min(0).max(100),
     type: Joi.string().valid('jpeg', 'png'),
   }),
-  url: Joi.string().required(),
-});
+  rejectRequestPattern,
+  url: Joi.string(),
+}).xor('url', 'html');
 
 export const content = Joi.object().keys({
+  cookies,
+  gotoOptions,
+  rejectRequestPattern,
   url: Joi.string().required(),
 });
 
 export const pdf = Joi.object().keys({
+  cookies,
+  emulateMedia: Joi.string().valid('screen', 'print'),
+  gotoOptions,
   html: Joi.string(),
   options: Joi.object().keys({
     displayHeaderFooter: Joi.boolean(),
@@ -41,6 +71,12 @@ export const pdf = Joi.object().keys({
     scale: Joi.number().min(0),
     width: Joi.any().optional(),
   }),
+  rejectRequestPattern,
+  safeMode: Joi.boolean().default(
+    false,
+    'Whether to safely generate the PDF (renders pages one-at-a-time and merges it in-memory). ' +
+    'Can prevent page crashes but is slower, consumes more memory, and returns a larger PDF.',
+  ),
   url: Joi.string(),
 }).xor('url', 'html');
 
@@ -48,4 +84,8 @@ export const fn = Joi.object().keys({
   code: Joi.string().required(),
   context: Joi.object(),
   detached: Joi.boolean(),
+});
+
+export const stats = Joi.object().keys({
+  url: Joi.string().required(),
 });
